@@ -459,6 +459,54 @@ function recalc(){
   }
   var totalCash=cash+totalProceeds;
   var buyPositions;
+
+  // Shared allocation logic used by both modes:
+  // 1. If cash >= total gap: fill every position to target, deploy remainder by model weight
+  // 2. If cash < total gap: scale all buys proportionally so every position moves toward target at the same rate
+  function allocateCash(cashAvail, posList, postSellFn, modelWeightTotal){
+    var totalAllocated=0;
+    if(posList.length===0) return totalAllocated;
+    var totalGap=posList.reduce(function(s,p){return s+Math.max(0,p.modelUSD-postSellFn(p));},0);
+    if(totalGap<=0) return totalAllocated;
+
+    if(cashAvail>=totalGap){
+      // Pass 1: fill every position exactly to target
+      posList.forEach(function(p){
+        var gap=Math.max(0,p.modelUSD-postSellFn(p));
+        var alloc=gap;
+        var shares=p.price>0?alloc/p.price:0;
+        if(whole){shares=Math.floor(shares);alloc=shares*p.price;}
+        p.allocationUSD=alloc;p.sharesToBuy=shares;
+        p.adjWeight=modelWeightTotal>0?p.modelWeight/modelWeightTotal:0;
+        totalAllocated+=alloc;
+      });
+      // Pass 2: deploy excess by model weight
+      var excess=cashAvail-totalAllocated;
+      if(excess>0.01){
+        var mwTotal=posList.reduce(function(s,p){return s+p.modelWeight;},0);
+        posList.forEach(function(p){
+          var extraAlloc=mwTotal>0?(p.modelWeight/mwTotal)*excess:0;
+          var extraShares=p.price>0?extraAlloc/p.price:0;
+          if(whole){extraShares=Math.floor(extraShares);extraAlloc=extraShares*p.price;}
+          p.allocationUSD+=extraAlloc;p.sharesToBuy+=extraShares;
+          totalAllocated+=extraAlloc;
+        });
+      }
+    } else {
+      // Insufficient cash: scale proportionally by gap so all positions move toward target at same rate
+      posList.forEach(function(p){
+        var gap=Math.max(0,p.modelUSD-postSellFn(p));
+        var adj=totalGap>0?gap/totalGap:0;
+        p.adjWeight=adj;
+        var alloc=cashAvail*adj;
+        var shares=p.price>0?alloc/p.price:0;
+        if(whole){shares=Math.floor(shares);alloc=shares*p.price;}
+        p.allocationUSD=alloc;p.sharesToBuy=shares;totalAllocated+=alloc;
+      });
+    }
+    return totalAllocated;
+  }
+
   if(!exOver){
     buyPositions=positions.filter(function(p){
       if(manualExclude.has(p.ticker)) return false;
@@ -466,8 +514,8 @@ function recalc(){
       if(p.modelUSD<=0) return false;
       return (p.initialUSD-p.sellUSD)<p.modelUSD;
     });
-    var n=buyPositions.length,totalAllocated=0;
-    if(n>0){buyPositions.forEach(function(p){p.adjWeight=1/n;var alloc=totalCash/n,shares=p.price>0?alloc/p.price:0;if(whole) shares=Math.floor(shares);alloc=shares*p.price;p.allocationUSD=alloc;p.sharesToBuy=shares;totalAllocated+=alloc;});}
+    var mwTotal=buyPositions.reduce(function(s,p){return s+p.modelWeight;},0);
+    var totalAllocated=allocateCash(totalCash, buyPositions, function(p){return p.initialUSD-p.sellUSD;}, mwTotal);
     positions.forEach(function(p){p.postUSD=(p.initialUSD-p.sellUSD)+p.allocationUSD;p.postRatio=p.modelUSD>0?p.postUSD/p.modelUSD:0;});
     var oot=positions.filter(function(p){return p.modelUSD>0&&(getTolerance(p)==='over'||getTolerance(p)==='under');}).length;
     document.getElementById('ss-sellcount').textContent=positions.filter(function(p){return p.sellUSD>0;}).length;
@@ -484,20 +532,20 @@ function recalc(){
       if(exNotHeld&&p.initialUSD===0) return false;
       return p.modelWeight>0;
     });
-    var totalGap=buyPositions.reduce(function(s,p){return s+Math.abs(p.differenceUSD);},0);
-    var totalAllocated=0;
-    buyPositions.forEach(function(p){var gap=Math.abs(p.differenceUSD),adj=totalGap>0?gap/totalGap:0;p.adjWeight=adj;var alloc=cash*adj,shares=p.price>0?alloc/p.price:0;if(whole){shares=Math.floor(shares);alloc=shares*p.price;}p.allocationUSD=alloc;p.sharesToBuy=shares;totalAllocated+=alloc;});
+    var mwTotal=buyPositions.reduce(function(s,p){return s+p.modelWeight;},0);
+    var totalAllocated=allocateCash(cash, buyPositions, function(p){return p.initialUSD;}, mwTotal);
     positions.forEach(function(p){p.postUSD=p.initialUSD+p.allocationUSD;p.postRatio=p.modelUSD>0?p.postUSD/p.modelUSD:0;});
+    var totalGap=buyPositions.reduce(function(s,p){return s+Math.abs(p.differenceUSD);},0);
     var remainder=cash-totalAllocated;
     document.getElementById('s-cash').textContent=fmt$(cash);
     document.getElementById('s-alloc').textContent=fmt$(totalAllocated);
-    var remEl=document.getElementById('s-rem');remEl.textContent=fmt$(remainder);remEl.className=remainder>1?'m-val remainder-warn':'m-val';
+    var remEl=document.getElementById('s-rem');remEl.textContent=fmt$(remainder);remEl.className=remainder>0.01?'m-val remainder-warn':'m-val';
     document.getElementById('s-gap').textContent=fmt$(totalGap);
     document.getElementById('s-incl').textContent=buyPositions.length;
     var oot=positions.filter(function(p){return p.modelUSD>0&&(getTolerance(p)==='over'||getTolerance(p)==='under');}).length;
     document.getElementById('s-oot').textContent=oot;
     var note=document.getElementById('infoNote');
-    if(cash>totalGap&&totalGap>0){note.textContent='Cash to deploy ('+fmt$(cash)+') exceeds the total underweight gap ('+fmt$(totalGap)+'). Uncheck "Exclude overweights" to also sell and redeploy proceeds.';note.style.display='block';}
+    if(cash>totalGap&&totalGap>0){note.textContent='Cash to deploy ('+fmt$(cash)+') exceeds the total underweight gap. Positions have been filled to target and excess deployed proportionally by model weight.';note.style.display='block';}
     else note.style.display='none';
   }
   renderTable();renderReport();renderTax();
