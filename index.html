@@ -367,7 +367,7 @@ tr.row-excluded td{opacity:0.35;text-decoration:line-through;background:var(--of
               <th onclick="sortBy('name')" id="th-name">Security Name<span class="sort-arrow" id="sa-name"></span></th>
               <th onclick="sortBy('price')" id="th-price">Price<span class="sort-arrow" id="sa-price"></span></th>
               <th onclick="sortBy('initialUSD')" id="th-initialUSD">Current Value<span class="sort-arrow" id="sa-initialUSD"></span></th>
-              <th onclick="sortBy('modelUSD')" id="th-modelUSD">Model Target<span class="sort-arrow" id="sa-modelUSD"></span></th>
+              <th onclick="sortBy('modelUSD')" id="th-modelUSD">Model Target<br><span style="font-size:9px;font-weight:400;opacity:0.6;text-transform:none;letter-spacing:0">orig / adj</span><span class="sort-arrow" id="sa-modelUSD"></span></th>
               <th onclick="sortBy('differenceUSD')" id="th-differenceUSD">Variance<span class="sort-arrow" id="sa-differenceUSD"></span></th>
               <th onclick="sortBy('sellUSD')" id="th-sellUSD">Sell<span class="sort-arrow" id="sa-sellUSD"></span></th>
               <th onclick="sortBy('allocationUSD')" id="th-allocationUSD">Buy<span class="sort-arrow" id="sa-allocationUSD"></span></th>
@@ -456,9 +456,8 @@ function parseTxt(raw){
   return results;
 }
 function getTolerance(p){
-  var target=p.rescaledModelUSD>0?p.rescaledModelUSD:p.modelUSD;
-  if(target<=0) return 'flat';
-  var r=p.postUSD/target;
+  if(p.modelUSD<=0) return 'flat';
+  var r=p.postUSD/p.modelUSD;
   return r>1.25?'over':r<0.75?'under':'ok';
 }
 function isTLHEligible(p){
@@ -605,7 +604,7 @@ function recalc(){
     });
     var mwTotal=buyPositions.reduce(function(s,p){return s+(p.rescaledModelWeight>0?p.rescaledModelWeight:p.modelWeight);},0);
     var totalAllocated=allocateCash(totalCash, buyPositions, function(p){return p.initialUSD-p.sellUSD;}, mwTotal, true);
-    positions.forEach(function(p){p.postUSD=(p.initialUSD-p.sellUSD)+p.allocationUSD;var tgt=p.rescaledModelUSD>0?p.rescaledModelUSD:p.modelUSD;p.postRatio=tgt>0?p.postUSD/tgt:0;});
+    positions.forEach(function(p){p.postUSD=(p.initialUSD-p.sellUSD)+p.allocationUSD;p.postRatio=p.modelUSD>0?p.postUSD/p.modelUSD:0;});
     var oot=positions.filter(function(p){return p.modelUSD>0&&(getTolerance(p)==='over'||getTolerance(p)==='under');}).length;
     document.getElementById('ss-sellcount').textContent=positions.filter(function(p){return p.sellUSD>0;}).length;
     document.getElementById('ss-proceeds').textContent=fmt$(totalProceeds);
@@ -623,7 +622,7 @@ function recalc(){
     });
     var mwTotal=buyPositions.reduce(function(s,p){return s+p.rescaledModelWeight;},0);
     var totalAllocated=allocateCash(cash, buyPositions, function(p){return p.initialUSD;}, mwTotal, false);
-    positions.forEach(function(p){p.postUSD=p.initialUSD+p.allocationUSD;p.postRatio=p.rescaledModelUSD>0?p.postUSD/p.rescaledModelUSD:0;});
+    positions.forEach(function(p){p.postUSD=p.initialUSD+p.allocationUSD;p.postRatio=p.modelUSD>0?p.postUSD/p.modelUSD:0;});
     var totalGap=buyPositions.reduce(function(s,p){return s+Math.max(0,p.rescaledModelUSD-p.initialUSD);},0);
     var remainder=cash-totalAllocated;
     document.getElementById('s-cash').textContent=fmt$(cash);
@@ -686,12 +685,20 @@ function renderTable(){
       +'<td class="cell-name">'+p.name+'</td>'
       +'<td class="cell-num">'+fmt$(p.price)+'</td>'
       +'<td class="cell-num">'+(p.initialUSD>0?fmt$(p.initialUSD):'--')+'</td>'
-      +'<td class="cell-num">'+(p.rescaledModelUSD>0&&p.rescaledModelUSD!==p.modelUSD?fmt$(p.rescaledModelUSD)+' <span class="badge" style="background:#e8f0f8;color:#1a4f7a;border:1px solid #b8d0e8;font-size:8px">adj</span>':p.modelUSD>0?fmt$(p.modelUSD):'--')+'</td>'
+      +'<td class="cell-num">'+(function(){
+        if(p.rescaledModelUSD>0&&Math.abs(p.rescaledModelUSD-p.modelUSD)>0.01){
+          return fmt$(p.modelUSD)
+            +'<br><span style="font-size:10px;color:var(--accent);font-weight:600">'
+            +fmt$(p.rescaledModelUSD)
+            +' <span class="badge" style="background:#e8f0f8;color:#1a4f7a;border:1px solid #b8d0e8;font-size:8px;vertical-align:middle">adj</span></span>';
+        }
+        return p.modelUSD>0?fmt$(p.modelUSD):'--';
+      })()+'</td>'
       +'<td class="cell-num '+dc+'">'+gd+' '+badge+'</td>'
       +'<td>'+sellCell+'</td>'
       +'<td class="cell-num">'+(p.allocationUSD>0?'<span class="buy-val">+'+fmt$(p.allocationUSD)+'</span>':'--')+'</td>'
       +'<td class="cell-num">'+(p.sharesToBuy>0?fmtSH(p.sharesToBuy,whole)+' sh':'--')+'</td>'
-      +'<td class="cell-num">'+(p.rescaledModelUSD>0||(p.modelUSD>0)?(p.postRatio*100).toFixed(1)+'% '+tolB:'--')+'</td>'
+      +'<td class="cell-num">'+(p.modelUSD>0?(p.postRatio*100).toFixed(1)+'% '+tolB:'--')+'</td>'
       +'</tr>';
   });
   document.getElementById('tableBody').innerHTML=html;
