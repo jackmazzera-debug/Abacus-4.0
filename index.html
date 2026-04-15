@@ -169,7 +169,12 @@ tr.row-over-tol td{background:rgba(192,57,43,0.04)}
 tr.row-over-tol:hover td{background:rgba(192,57,43,0.08)}
 tr.row-under-tol td{background:rgba(184,150,62,0.05)}
 tr.row-under-tol:hover td{background:rgba(184,150,62,0.1)}
-tr.row-excluded td{opacity:0.35;text-decoration:line-through;background:var(--off-white)}
+tr.row-buy td{background:rgba(39,98,58,0.05)}
+tr.row-buy:hover td{background:rgba(39,98,58,0.09)}
+tr.row-excluded td{opacity:1;text-decoration:none;background:#f0f0f0;border-left:3px solid #b0b0b0}
+tr.row-excluded .cell-ticker{color:var(--text-muted);text-decoration:line-through}
+tr.row-excluded .cell-name{text-decoration:line-through;color:var(--text-muted)}
+tr.row-excluded td:not(:first-child){color:var(--text-muted)}
 
 /* CELL STYLES */
 .cell-ticker{font-weight:700;color:var(--accent);font-size:12px}
@@ -214,6 +219,16 @@ tr.row-excluded td{opacity:0.35;text-decoration:line-through;background:var(--of
 
 /* FOOTER */
 .page-footer{background:var(--navy);color:rgba(255,255,255,0.35);font-size:10px;text-align:center;padding:.75rem;margin-top:2rem;letter-spacing:.03em}
+.instr-wrap{max-width:860px}
+.instr-section{margin-bottom:2rem}
+.instr-h2{font-size:15px;font-weight:700;color:var(--text-primary);margin-bottom:1rem;padding-bottom:.5rem;border-bottom:2px solid var(--accent)}
+.instr-card{background:var(--off-white);border:1px solid var(--border);border-radius:6px;padding:1rem 1.25rem;margin-bottom:.75rem}
+.instr-card-title{font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:.4rem}
+.instr-p{font-size:13px;color:var(--text-secondary);line-height:1.7}
+.instr-p strong{color:var(--text-primary);font-weight:600}
+.instr-list{font-size:13px;color:var(--text-secondary);line-height:1.7;margin-left:1.25rem}
+.instr-list li{margin-bottom:.4rem}
+.instr-list strong{color:var(--text-primary);font-weight:600}
 </style>
 </head>
 <body>
@@ -275,6 +290,7 @@ tr.row-excluded td{opacity:0.35;text-decoration:line-through;background:var(--of
       <div class="tab active" onclick="showTab('calculator')">Calculator</div>
       <div class="tab" onclick="showTab('report')">Pre / Post Report</div>
       <div class="tab" onclick="showTab('tax')">Tax Dashboard</div>
+      <div class="tab" onclick="showTab('instructions')">Instructions</div>
     </div>
     <div class="tab-content">
 
@@ -284,22 +300,22 @@ tr.row-excluded td{opacity:0.35;text-decoration:line-through;background:var(--of
         <div class="controls-grid">
           <div class="control-card">
             <label class="field-label">Cash to Deploy</label>
-            <input type="number" id="cashInput" value="200000" min="0" step="1000" oninput="recalc()">
+            <input type="number" id="cashInput" value="0" min="0" step="1000" oninput="recalc()">
             <div style="font-size:10px;color:var(--text-muted);margin-top:5px">Added on top of existing positions</div>
           </div>
           <div class="toggles-card">
-            <div class="toggle-row"><input type="checkbox" id="excludeOver" onchange="onExcludeOverChange()" checked><label for="excludeOver">Exclude overweights from buys</label></div>
+            <div class="toggle-row"><input type="checkbox" id="excludeOver" onchange="onExcludeOverChange()"><label for="excludeOver">Exclude overweights from buys</label></div>
             <div class="toggle-row"><input type="checkbox" id="excludeNotHeld" onchange="recalc()"><label for="excludeNotHeld">Only add to currently held positions</label></div>
-            <div class="toggle-row"><input type="checkbox" id="wholeShares" onchange="recalc()"><label for="wholeShares">Whole shares only</label></div>
+            <div class="toggle-row"><input type="checkbox" id="wholeShares" onchange="recalc()" checked><label for="wholeShares">Whole shares only</label></div>
           </div>
         </div>
 
         <div class="sell-mode-bar" id="sellModeBar">
           <span class="sell-mode-label">Sell Mode</span>
-          <button class="seg-btn active" id="btn-trim-target" onclick="setSellMode('target')">Trim to Original Target</button>
+          <button class="seg-btn" id="btn-trim-target" onclick="setSellMode('target')">Trim to Original Target</button>
           <button class="seg-btn" id="btn-trim-adjusted" onclick="setSellMode('adjusted')">Trim to Adjusted Target</button>
-          <button class="seg-btn" id="btn-trim-threshold" onclick="setSellMode('threshold')">Trim to 125% Threshold</button>
-          <span class="sell-mode-desc" id="sellModeDesc">Sells overweights to their original model target. Proceeds redeployed across underweights.</span>
+          <button class="seg-btn active" id="btn-trim-threshold" onclick="setSellMode('threshold')">Trim to 125% Threshold</button>
+          <span class="sell-mode-desc" id="sellModeDesc">Sells only the portion above 125% of the original model target. Proceeds redeployed across underweights.</span>
         </div>
         <div class="adjusted-info-box" id="adjustedInfoBox" style="display:none">
           <div class="aib-header">
@@ -337,8 +353,11 @@ tr.row-excluded td{opacity:0.35;text-decoration:line-through;background:var(--of
 
         <div class="legend-bar">
           <span class="legend-label">Highlights</span>
+          <div class="legend-item"><div class="legend-swatch" style="background:rgba(39,98,58,0.1);border:1px solid rgba(39,98,58,0.3)"></div><span>Buy order</span></div>
+          <div class="legend-item"><div class="legend-swatch" style="background:#fdf5f5;border:1px solid #f0c0bb"></div><span>Sell order</span></div>
           <div class="legend-item"><div class="legend-swatch sw-over-tol"></div><span>Post-trade &gt;125% of target</span></div>
           <div class="legend-item"><div class="legend-swatch sw-under-tol"></div><span>Post-trade &lt;75% of target</span></div>
+          <div class="legend-item"><div class="legend-swatch" style="background:#f0f0f0;border-left:3px solid #b0b0b0;border-top:1px solid #ddd;border-right:1px solid #ddd;border-bottom:1px solid #ddd"></div><span>Hidden / restricted</span></div>
         </div>
 
         <div class="info-note" id="infoNote" style="display:none"></div>
@@ -386,17 +405,124 @@ tr.row-excluded td{opacity:0.35;text-decoration:line-through;background:var(--of
 
       <!-- TAX PANEL -->
       <div class="panel" id="tab-tax">
+        <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;padding:.75rem 1rem;background:var(--off-white);border:1px solid var(--border);border-radius:6px">
+          <span style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">TLH Thresholds</span>
+          <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)">
+            <label for="tlhDollar" style="white-space:nowrap">Min loss ($)</label>
+            <input type="number" id="tlhDollar" value="5000" min="0" step="500" oninput="renderTax()" style="width:100px;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;background:var(--white);outline:none">
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)">
+            <label for="tlhPct" style="white-space:nowrap">Min loss (%)</label>
+            <input type="number" id="tlhPct" value="5" min="0" step="0.5" oninput="renderTax()" style="width:80px;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;background:var(--white);outline:none">
+          </div>
+          <span style="font-size:11px;color:var(--text-muted)">Both thresholds must be met to qualify</span>
+        </div>
         <div id="taxContent"><div class="no-data">Load a file to generate the tax dashboard.</div></div>
       </div>
 
-    </div><!-- end tab-content -->
+        <!-- INSTRUCTIONS PANEL -->
+      <div class="panel" id="tab-instructions">
+        <div class="instr-wrap">
+
+          <div class="instr-section">
+            <h2 class="instr-h2">Getting started</h2>
+            <p class="instr-p">Upload your Tamarac rebalance export (.txt file) using the upload area at the top of the page, or paste the raw text directly. The tool will parse every position in the file and load them into the calculator. Once loaded, set your cash to deploy and configure the options below.</p>
+          </div>
+
+          <div class="instr-section">
+            <h2 class="instr-h2">Calculator controls</h2>
+
+            <div class="instr-card">
+              <div class="instr-card-title">Cash to Deploy</div>
+              <p class="instr-p">The dollar amount of <strong>new cash</strong> you are adding to the portfolio. This is invested on top of existing positions — it does not represent the total portfolio value. Defaults to $0. Enter your wire amount or available cash balance here.</p>
+            </div>
+
+            <div class="instr-card">
+              <div class="instr-card-title">Exclude overweights from buys</div>
+              <p class="instr-p">When checked, any position that is already above its model target is excluded from receiving new cash. Use this when you are <strong>adding cash only</strong> and do not want to touch existing overweight positions — for example, when trading around embedded gains in a taxable account or managing a restricted position. Cash is deployed pro-rata across underweight positions based on the size of their gap to target.</p>
+              <p class="instr-p" style="margin-top:.5rem">When <strong>unchecked</strong>, the sell mode bar appears and the tool enters full rebalance mode — overweight positions can be trimmed and proceeds redeployed alongside your new cash.</p>
+            </div>
+
+            <div class="instr-card">
+              <div class="instr-card-title">Only add to currently held positions</div>
+              <p class="instr-p">When checked, positions that are in the model but currently have a $0 balance are excluded from receiving new cash. Useful when you want to build existing positions before initiating new ones.</p>
+            </div>
+
+            <div class="instr-card">
+              <div class="instr-card-title">Whole shares only</div>
+              <p class="instr-p">When checked, all buy and sell quantities are rounded down to the nearest whole share. Any undeployed cash from rounding appears as a remainder in the summary. Recommended for most use cases — leave unchecked only if your custodian supports fractional shares.</p>
+            </div>
+          </div>
+
+          <div class="instr-section">
+            <h2 class="instr-h2">Sell mode</h2>
+            <p class="instr-p">Sell mode is only active when <strong>Exclude overweights from buys</strong> is unchecked. It controls how aggressively overweight positions are trimmed before proceeds are redeployed.</p>
+
+            <div class="instr-card">
+              <div class="instr-card-title">Trim to Original Target</div>
+              <p class="instr-p">Sells each overweight position down to its exact model target dollar value as imported from Tamarac. This is the most aggressive trim — it brings all overweights fully back to model before redeploying. Use when you want a clean rebalance with no overweights remaining.</p>
+            </div>
+
+            <div class="instr-card">
+              <div class="instr-card-title">Trim to Adjusted Target</div>
+              <p class="instr-p">Sells overweights down to their <strong>adjusted target</strong> — the rescaled model weight after accounting for any manually hidden/restricted positions. When you exclude a position using the row checkbox, its model weight is redistributed proportionally to all remaining positions, raising their ideal targets slightly. In this mode, a position that appears overweight vs its original target may actually be at or below its adjusted target and will <strong>not be sold</strong>. Use this when you have restricted or legacy positions that can't be traded and want the rest of the portfolio to rebalance naturally around them.</p>
+            </div>
+
+            <div class="instr-card">
+              <div class="instr-card-title">Trim to 125% Threshold <span style="font-size:10px;font-weight:400;color:var(--text-muted)">(default)</span></div>
+              <p class="instr-p">Only sells the portion of a position that sits above 125% of its model target. This is the most conservative trim — positions that are overweight but within 125% of target are left untouched. Use when you want to trim only the most extreme outliers without triggering unnecessary trades.</p>
+            </div>
+          </div>
+
+          <div class="instr-section">
+            <h2 class="instr-h2">Hiding / restricting positions</h2>
+            <p class="instr-p">Use the <strong>Excl. checkbox</strong> on any row to manually hide a position from the calculator. Hidden positions are shown in gray with a left border indicator so they remain visible but clearly marked as inactive.</p>
+            <p class="instr-p" style="margin-top:.5rem">When a position is hidden, its model weight is automatically redistributed proportionally across all remaining included positions. The <strong>Model Target column</strong> will show both the original target and the adjusted target (labeled "adj" in blue) for any position whose target has been rescaled.</p>
+            <p class="instr-p" style="margin-top:.5rem">Common use cases: restricted securities, positions with wash sale considerations, legacy holdings that cannot be traded, or positions you want to intentionally skip in a given rebalance.</p>
+          </div>
+
+          <div class="instr-section">
+            <h2 class="instr-h2">Pre / Post Report tab</h2>
+            <p class="instr-p">This tab shows the impact of the proposed trades on portfolio alignment. It includes:</p>
+            <ul class="instr-list">
+              <li><strong>Portfolio value</strong> — total current value vs projected post-trade value</li>
+              <li><strong>Model deviation (RMSD)</strong> — a measure of how far the portfolio sits from its model weights before and after the trade. Lower is better. A falling RMSD means the trades are moving the portfolio closer to model.</li>
+              <li><strong>Out of tolerance count</strong> — number of positions outside the 75%–125% tolerance band pre and post trade</li>
+              <li><strong>Top 5 overweight / underweight</strong> — the five largest deviations from model target, shown both before and after the proposed trades</li>
+            </ul>
+            <p class="instr-p" style="margin-top:.5rem">Use this tab to sanity-check a rebalance before executing. If the post-trade RMSD is not lower than the pre-trade RMSD, the trade set is not improving model alignment.</p>
+          </div>
+
+          <div class="instr-section">
+            <h2 class="instr-h2">Tax Dashboard tab</h2>
+            <p class="instr-p">The tax dashboard surfaces unrealized gain and loss data parsed directly from the Tamarac export. It includes:</p>
+            <ul class="instr-list">
+              <li><strong>Total unrealized ST / LT</strong> — portfolio-wide short-term and long-term gain/loss totals</li>
+              <li><strong>Tax loss harvest candidates</strong> — positions that meet both the dollar loss and percentage loss thresholds you set. Adjust the thresholds using the input fields at the top of the section.</li>
+              <li><strong>Largest unrealized losses / gains</strong> — ranked lists of the top 8 positions by unrealized gain or loss</li>
+            </ul>
+            <p class="instr-p" style="margin-top:.5rem">TLH candidates are identified by two criteria that must both be met: the total unrealized loss must exceed the <strong>dollar threshold</strong> and the loss as a percentage of cost basis must exceed the <strong>% threshold</strong>. Both fields are adjustable. Default is losses greater than $5,000 and greater than 5%.</p>
+          </div>
+
+          <div class="instr-section">
+            <h2 class="instr-h2">Exports</h2>
+            <ul class="instr-list">
+              <li><strong>PDF Report</strong> — generates a formatted landscape PDF including the portfolio summary, top overweight/underweight positions, sell orders (if applicable), buy orders, and TLH candidates. Suitable for printing or sharing with the PM team.</li>
+              <li><strong>Excel Trade Blotter</strong> — generates a multi-tab .xlsx workbook. The Sells tab lists all sell orders, the Buys tab lists all buy orders, the Full Snapshot tab shows every position with pre and post values, and the TLH Candidates tab lists positions meeting your harvest threshold.</li>
+            </ul>
+          </div>
+
+        </div>
+      </div>
+
+  </div><!-- end tab-content -->
   </div><!-- end appBody -->
 </div><!-- end main -->
 
 <div class="page-footer">Abacus 4.0 &nbsp;|&nbsp; For internal use only &nbsp;|&nbsp; Trading Operations</div>
 
 <script>
-var positions=[], sortCol='fileOrder', sortDir=1, manualExclude=new Set(), sellMode='target';
+var positions=[], sortCol='fileOrder', sortDir=1, manualExclude=new Set(), sellMode='threshold';
 var TLH_DOLLAR=5000, TLH_PCT=5;
 
 document.getElementById('headerDate').textContent=new Date().toLocaleDateString('en-US',{weekday:'short',year:'numeric',month:'short',day:'numeric'});
@@ -464,7 +590,10 @@ function isTLHEligible(p){
   if(p.initialUSD<=0) return false;
   var gl=p.stGain+p.ltGain;if(gl>=0) return false;
   var loss=Math.abs(gl),basis=p.initialUSD+loss;
-  return loss>TLH_DOLLAR&&(loss/basis)*100>TLH_PCT;
+  var dlEl=document.getElementById('tlhDollar'),pctEl=document.getElementById('tlhPct');
+  var dl=dlEl?parseFloat(dlEl.value)||0:TLH_DOLLAR;
+  var pt=pctEl?parseFloat(pctEl.value)||0:TLH_PCT;
+  return loss>dl&&(loss/basis)*100>pt;
 }
 function fmt$(v){return'$'+Math.abs(parseFloat(v)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
 
@@ -670,6 +799,8 @@ function renderTable(){
     var rc='';
     if(isExcl) rc='row-excluded';
     else if(p.sellUSD>0&&p.allocationUSD===0) rc='row-sell';
+    else if(p.sellUSD>0&&p.allocationUSD>0) rc='row-sell';
+    else if(p.allocationUSD>0) rc='row-buy';
     else if(tol==='over') rc='row-over-tol';
     else if(tol==='under') rc='row-under-tol';
     var dc=p.differenceUSD>0?'diff-pos':p.differenceUSD<0?'diff-neg':'';
@@ -697,7 +828,12 @@ function renderTable(){
       +'<td class="cell-num '+dc+'">'+gd+' '+badge+'</td>'
       +'<td>'+sellCell+'</td>'
       +'<td class="cell-num">'+(p.allocationUSD>0?'<span class="buy-val">+'+fmt$(p.allocationUSD)+'</span>':'--')+'</td>'
-      +'<td class="cell-num">'+(p.sharesToBuy>0?fmtSH(p.sharesToBuy,whole)+' sh':'--')+'</td>'
+      +'<td class="cell-num">'+(function(){
+        var parts=[];
+        if(p.sharesToSell>0) parts.push('<span class="sell-val">-'+fmtSH(p.sharesToSell,whole)+' sh</span>');
+        if(p.sharesToBuy>0) parts.push('<span class="buy-val">+'+fmtSH(p.sharesToBuy,whole)+' sh</span>');
+        return parts.length>0?parts.join('<br>'):'--';
+      })()+'</td>'
       +'<td class="cell-num">'+(p.modelUSD>0?(p.postRatio*100).toFixed(1)+'% '+tolB:'--')+'</td>'
       +'</tr>';
   });
