@@ -110,6 +110,14 @@ textarea:focus{border-color:var(--accent)}
 .seg-btn{padding:5px 14px;border-radius:20px;border:1px solid var(--red-border);background:var(--white);font-size:11px;font-weight:600;cursor:pointer;color:var(--text-muted);transition:all .12s}
 .seg-btn.active{background:var(--red);color:var(--white);border-color:var(--red)}
 .sell-mode-desc{font-size:11px;color:var(--text-muted);margin-left:4px}
+.adjusted-info-box{background:var(--white);border:1px solid #b8d0e8;border-left:4px solid var(--accent);border-radius:6px;padding:1rem 1.25rem;margin-top:.75rem}
+.aib-header{display:flex;align-items:center;gap:8px;margin-bottom:.625rem}
+.aib-icon{color:var(--accent);font-size:16px;font-weight:700}
+.aib-title{font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.05em}
+.aib-body{font-size:12px;color:var(--text-secondary);line-height:1.6}
+.aib-body strong{color:var(--text-primary);font-weight:600}
+.aib-body em{color:var(--accent);font-style:normal;font-weight:600}
+.aib-body li{margin-bottom:.25rem}
 
 /* SUMMARY METRICS */
 .metrics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:1.25rem}
@@ -288,9 +296,26 @@ tr.row-excluded td{opacity:0.35;text-decoration:line-through;background:var(--of
 
         <div class="sell-mode-bar" id="sellModeBar">
           <span class="sell-mode-label">Sell Mode</span>
-          <button class="seg-btn active" id="btn-trim-target" onclick="setSellMode('target')">Trim to Target</button>
+          <button class="seg-btn active" id="btn-trim-target" onclick="setSellMode('target')">Trim to Original Target</button>
+          <button class="seg-btn" id="btn-trim-adjusted" onclick="setSellMode('adjusted')">Trim to Adjusted Target</button>
           <button class="seg-btn" id="btn-trim-threshold" onclick="setSellMode('threshold')">Trim to 125% Threshold</button>
-          <span class="sell-mode-desc" id="sellModeDesc">Sells overweights to model target. Proceeds redeployed evenly across underweights.</span>
+          <span class="sell-mode-desc" id="sellModeDesc">Sells overweights to their original model target. Proceeds redeployed across underweights.</span>
+        </div>
+        <div class="adjusted-info-box" id="adjustedInfoBox" style="display:none">
+          <div class="aib-header">
+            <span class="aib-icon">&#9432;</span>
+            <span class="aib-title">Trim to Adjusted Target — How it works</span>
+          </div>
+          <div class="aib-body">
+            <p>When positions are <strong>manually excluded</strong> (e.g. restricted securities), their model weights are redistributed proportionally across the remaining positions. This creates a new <em>adjusted target</em> for each included position that is slightly higher than the original.</p>
+            <p style="margin-top:.5rem">In this mode, overweight positions are only sold down to their <strong>adjusted target</strong> — not their original target. This means:</p>
+            <ul style="margin:.4rem 0 0 1rem">
+              <li>A position that is overweight vs its <em>original</em> target may actually be <em>at or below</em> its adjusted target and will <strong>not be sold</strong></li>
+              <li>A position that is still overweight vs its adjusted target will be trimmed to that higher threshold</li>
+              <li>The result is a portfolio aligned to the rescaled model weights, accounting for the excluded positions</li>
+            </ul>
+            <p style="margin-top:.5rem;color:var(--text-muted);font-size:11px">Use this mode when you have restricted or legacy positions that cannot be traded and you want the rest of the portfolio to rebalance around them naturally.</p>
+          </div>
         </div>
 
         <div id="summaryDefault" class="metrics-grid">
@@ -393,10 +418,15 @@ function onExcludeOverChange(){
 function setSellMode(mode){
   sellMode=mode;
   document.getElementById('btn-trim-target').classList.toggle('active',mode==='target');
+  document.getElementById('btn-trim-adjusted').classList.toggle('active',mode==='adjusted');
   document.getElementById('btn-trim-threshold').classList.toggle('active',mode==='threshold');
-  document.getElementById('sellModeDesc').textContent=mode==='target'
-    ?'Sells overweights to model target. Proceeds redeployed evenly across underweights.'
-    :'Sells only portion above 125% of model target. Proceeds redeployed evenly across underweights.';
+  var descs={
+    'target':'Sells overweights to their original model target. Proceeds redeployed across underweights.',
+    'adjusted':'Sells overweights to their adjusted target — rescaled to account for any excluded/restricted positions. Proceeds redeployed across underweights.',
+    'threshold':'Sells only the portion above 125% of the original model target. Proceeds redeployed across underweights.'
+  };
+  document.getElementById('sellModeDesc').textContent=descs[mode]||descs['target'];
+  document.getElementById('adjustedInfoBox').style.display=mode==='adjusted'?'block':'none';
   recalc();
 }
 function parseNum(s){
@@ -470,9 +500,21 @@ function recalc(){
   if(!exOver){
     positions.forEach(function(p){
       if(manualExclude.has(p.ticker)||p.modelUSD<=0||p.initialUSD<=0) return;
-      var ratio=p.initialUSD/p.modelUSD,sellTarget=0;
-      if(sellMode==='target'){if(p.differenceUSD>0) sellTarget=p.differenceUSD;}
-      else{if(ratio>1.25) sellTarget=p.initialUSD-(p.modelUSD*1.25);}
+      var origTgt=p.modelUSD;
+      var adjTgt=p.rescaledModelUSD>0?p.rescaledModelUSD:p.modelUSD;
+      var sellTarget=0;
+      if(sellMode==='target'){
+        // Trim to ORIGINAL model target regardless of any exclusions
+        if(p.differenceUSD>0) sellTarget=p.differenceUSD;
+      } else if(sellMode==='adjusted'){
+        // Trim to ADJUSTED/RESCALED target — accounts for excluded/restricted positions
+        // Position is only sold if it sits above its rescaled target
+        if(p.initialUSD>adjTgt) sellTarget=p.initialUSD-adjTgt;
+      } else {
+        // Trim to 125% of ORIGINAL target threshold
+        var ratio=p.initialUSD/origTgt;
+        if(ratio>1.25) sellTarget=p.initialUSD-(origTgt*1.25);
+      }
       if(sellTarget<=0) return;
       var shares=p.price>0?sellTarget/p.price:0;
       if(whole) shares=Math.floor(shares);
@@ -482,52 +524,73 @@ function recalc(){
   var totalCash=cash+totalProceeds;
   var buyPositions;
 
-  // Shared allocation logic used by both modes:
-  // 1. If cash >= total gap: fill every position to target, deploy remainder by model weight
-  // 2. If cash < total gap: scale all buys proportionally so every position moves toward target at the same rate
-  function allocateCash(cashAvail, posList, postSellFn, modelWeightTotal){
+  // Helpers — use rescaledModelUSD/Weight when positions are excluded (restricted mode), else original
+  function targetUSD(p){return p.rescaledModelUSD>0?p.rescaledModelUSD:p.modelUSD;}
+  function targetWeight(p){return p.rescaledModelWeight>0?p.rescaledModelWeight:p.modelWeight;}
+
+  // allocateCash: deploys cashAvail across posList so every position lands at the same % of its target.
+  // postSellFn(p) returns current value after any sells.
+  // uniformMode = true  → find the single ratio R such that every position is bought to R * target,
+  //                        where R is determined by total cash available vs total target value.
+  //               false → buy-only mode: pro-rata by gap (cash is always < total gap in this mode).
+  function allocateCash(cashAvail, posList, postSellFn, modelWeightTotal, uniformMode){
     var totalAllocated=0;
     if(posList.length===0) return totalAllocated;
-    // Use rescaledModelUSD as target if available (restricted position mode), else fall back to modelUSD
-    function targetUSD(p){return p.rescaledModelUSD>0?p.rescaledModelUSD:p.modelUSD;}
-    function targetWeight(p){return p.rescaledModelWeight>0?p.rescaledModelWeight:p.modelWeight;}
-    var totalGap=posList.reduce(function(s,p){return s+Math.max(0,targetUSD(p)-postSellFn(p));},0);
-    if(totalGap<=0) return totalAllocated;
 
-    if(cashAvail>=totalGap){
-      // Pass 1: fill every position exactly to rescaled target
+    if(uniformMode){
+      // Uniform ratio mode (sell + redeploy):
+      // Total post-sell value of included positions + cash to deploy = R * sum of their targets
+      // R = (sum of post-sell values + cashAvail) / sum of targets
+      var totalPostSell=posList.reduce(function(s,p){return s+postSellFn(p);},0);
+      var totalTarget=posList.reduce(function(s,p){return s+targetUSD(p);},0);
+      if(totalTarget<=0) return totalAllocated;
+      var R=(totalPostSell+cashAvail)/totalTarget; // uniform target ratio for all positions
       posList.forEach(function(p){
-        var gap=Math.max(0,targetUSD(p)-postSellFn(p));
-        var alloc=gap;
-        var shares=p.price>0?alloc/p.price:0;
-        if(whole){shares=Math.floor(shares);alloc=shares*p.price;}
-        p.allocationUSD=alloc;p.sharesToBuy=shares;
-        p.adjWeight=modelWeightTotal>0?targetWeight(p)/modelWeightTotal:0;
-        totalAllocated+=alloc;
-      });
-      // Pass 2: deploy excess by rescaled model weight
-      var excess=cashAvail-totalAllocated;
-      if(excess>0.01){
-        var mwTotal=posList.reduce(function(s,p){return s+targetWeight(p);},0);
-        posList.forEach(function(p){
-          var extraAlloc=mwTotal>0?(targetWeight(p)/mwTotal)*excess:0;
-          var extraShares=p.price>0?extraAlloc/p.price:0;
-          if(whole){extraShares=Math.floor(extraShares);extraAlloc=extraShares*p.price;}
-          p.allocationUSD+=extraAlloc;p.sharesToBuy+=extraShares;
-          totalAllocated+=extraAlloc;
-        });
-      }
-    } else {
-      // Insufficient cash: scale proportionally by gap so all positions move toward rescaled target at same rate
-      posList.forEach(function(p){
-        var gap=Math.max(0,targetUSD(p)-postSellFn(p));
-        var adj=totalGap>0?gap/totalGap:0;
-        p.adjWeight=adj;
-        var alloc=cashAvail*adj;
+        var tgt=targetUSD(p);
+        var idealValue=R*tgt;
+        var alloc=Math.max(0,idealValue-postSellFn(p));
+        p.adjWeight=totalTarget>0?tgt/totalTarget:0;
         var shares=p.price>0?alloc/p.price:0;
         if(whole){shares=Math.floor(shares);alloc=shares*p.price;}
         p.allocationUSD=alloc;p.sharesToBuy=shares;totalAllocated+=alloc;
       });
+    } else {
+      // Buy-only mode: pro-rata by gap — cash < total gap, everyone moves toward target proportionally
+      var totalGap=posList.reduce(function(s,p){return s+Math.max(0,targetUSD(p)-postSellFn(p));},0);
+      if(totalGap<=0) return totalAllocated;
+      if(cashAvail>=totalGap){
+        // Enough cash to fill all gaps — fill to target then deploy excess by model weight
+        posList.forEach(function(p){
+          var gap=Math.max(0,targetUSD(p)-postSellFn(p));
+          var alloc=gap;
+          var shares=p.price>0?alloc/p.price:0;
+          if(whole){shares=Math.floor(shares);alloc=shares*p.price;}
+          p.allocationUSD=alloc;p.sharesToBuy=shares;
+          p.adjWeight=modelWeightTotal>0?targetWeight(p)/modelWeightTotal:0;
+          totalAllocated+=alloc;
+        });
+        var excess=cashAvail-totalAllocated;
+        if(excess>0.01){
+          var mwTotal=posList.reduce(function(s,p){return s+targetWeight(p);},0);
+          posList.forEach(function(p){
+            var extraAlloc=mwTotal>0?(targetWeight(p)/mwTotal)*excess:0;
+            var extraShares=p.price>0?extraAlloc/p.price:0;
+            if(whole){extraShares=Math.floor(extraShares);extraAlloc=extraShares*p.price;}
+            p.allocationUSD+=extraAlloc;p.sharesToBuy+=extraShares;totalAllocated+=extraAlloc;
+          });
+        }
+      } else {
+        // Insufficient cash — scale by gap so all positions move at same rate
+        posList.forEach(function(p){
+          var gap=Math.max(0,targetUSD(p)-postSellFn(p));
+          var adj=totalGap>0?gap/totalGap:0;
+          p.adjWeight=adj;
+          var alloc=cashAvail*adj;
+          var shares=p.price>0?alloc/p.price:0;
+          if(whole){shares=Math.floor(shares);alloc=shares*p.price;}
+          p.allocationUSD=alloc;p.sharesToBuy=shares;totalAllocated+=alloc;
+        });
+      }
     }
     return totalAllocated;
   }
@@ -541,7 +604,7 @@ function recalc(){
       return (p.initialUSD-p.sellUSD)<tgt;
     });
     var mwTotal=buyPositions.reduce(function(s,p){return s+(p.rescaledModelWeight>0?p.rescaledModelWeight:p.modelWeight);},0);
-    var totalAllocated=allocateCash(totalCash, buyPositions, function(p){return p.initialUSD-p.sellUSD;}, mwTotal);
+    var totalAllocated=allocateCash(totalCash, buyPositions, function(p){return p.initialUSD-p.sellUSD;}, mwTotal, true);
     positions.forEach(function(p){p.postUSD=(p.initialUSD-p.sellUSD)+p.allocationUSD;var tgt=p.rescaledModelUSD>0?p.rescaledModelUSD:p.modelUSD;p.postRatio=tgt>0?p.postUSD/tgt:0;});
     var oot=positions.filter(function(p){return p.modelUSD>0&&(getTolerance(p)==='over'||getTolerance(p)==='under');}).length;
     document.getElementById('ss-sellcount').textContent=positions.filter(function(p){return p.sellUSD>0;}).length;
@@ -559,7 +622,7 @@ function recalc(){
       return p.rescaledModelUSD>0;
     });
     var mwTotal=buyPositions.reduce(function(s,p){return s+p.rescaledModelWeight;},0);
-    var totalAllocated=allocateCash(cash, buyPositions, function(p){return p.initialUSD;}, mwTotal);
+    var totalAllocated=allocateCash(cash, buyPositions, function(p){return p.initialUSD;}, mwTotal, false);
     positions.forEach(function(p){p.postUSD=p.initialUSD+p.allocationUSD;p.postRatio=p.rescaledModelUSD>0?p.postUSD/p.rescaledModelUSD:0;});
     var totalGap=buyPositions.reduce(function(s,p){return s+Math.max(0,p.rescaledModelUSD-p.initialUSD);},0);
     var remainder=cash-totalAllocated;
