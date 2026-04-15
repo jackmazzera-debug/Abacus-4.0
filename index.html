@@ -987,6 +987,7 @@ function loadData(raw){
   if(!positions.length){alert('No positions found. Please check the file format.');return;}
   document.getElementById('appBody').style.display='block';
   document.getElementById('positionCount').textContent=positions.length+' positions loaded';
+  onExcludeOverChange();
   sortCol='fileOrder';sortDir=1;
   document.querySelectorAll('.sort-arrow').forEach(function(el){el.innerHTML='';});
   document.querySelectorAll('th').forEach(function(el){el.classList.remove('active-sort');});
