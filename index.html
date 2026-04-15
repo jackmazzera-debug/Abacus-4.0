@@ -419,15 +419,16 @@ function parseTxt(raw){
       var differenceUSD=parseNum(lines[i+7]),differenceShares=parseNum(lines[i+8]),differenceWeight=parseNum(lines[i+9]);
       var stGain=0,ltGain=0;
       try{stGain=parseNum(lines[i+15]||'0');ltGain=parseNum(lines[i+16]||'0');var st2=parseNum(lines[i+17]||'0'),lt2=parseNum(lines[i+18]||'0');stGain=stGain||st2;ltGain=ltGain||lt2;}catch(e){}
-      if(modelWeight>0||initialUSD>0) results.push({fileOrder:fo++,ticker:ticker,name:name,price:price,initialUSD:initialUSD,initialShares:initialShares,initialWeight:initialWeight,modelUSD:modelUSD,modelShares:modelShares,modelWeight:modelWeight,differenceUSD:differenceUSD,differenceShares:differenceShares,differenceWeight:differenceWeight,stGain:stGain,ltGain:ltGain,adjWeight:0,allocationUSD:0,sharesToBuy:0,sellUSD:0,sharesToSell:0,postUSD:0,postRatio:0});
+      if(modelWeight>0||initialUSD>0) results.push({fileOrder:fo++,ticker:ticker,name:name,price:price,initialUSD:initialUSD,initialShares:initialShares,initialWeight:initialWeight,modelUSD:modelUSD,modelShares:modelShares,modelWeight:modelWeight,differenceUSD:differenceUSD,differenceShares:differenceShares,differenceWeight:differenceWeight,stGain:stGain,ltGain:ltGain,adjWeight:0,allocationUSD:0,sharesToBuy:0,sellUSD:0,sharesToSell:0,postUSD:0,postRatio:0,rescaledModelUSD:modelUSD,rescaledModelWeight:modelWeight});
       i+=19;
     } else {i++;}
   }
   return results;
 }
 function getTolerance(p){
-  if(p.modelUSD<=0) return 'flat';
-  var r=p.postUSD/p.modelUSD;
+  var target=p.rescaledModelUSD>0?p.rescaledModelUSD:p.modelUSD;
+  if(target<=0) return 'flat';
+  var r=p.postUSD/target;
   return r>1.25?'over':r<0.75?'under':'ok';
 }
 function isTLHEligible(p){
@@ -444,6 +445,27 @@ function recalc(){
   var exNotHeld=document.getElementById('excludeNotHeld').checked;
   var whole=document.getElementById('wholeShares').checked;
   positions.forEach(function(p){p.sellUSD=0;p.sharesToSell=0;p.adjWeight=0;p.allocationUSD=0;p.sharesToBuy=0;});
+
+  // Rescale model targets for manually excluded positions (restricted position mode)
+  // Excluded positions' model weights get redistributed proportionally to remaining positions
+  var includedForScale=positions.filter(function(p){return !manualExclude.has(p.ticker)&&p.modelWeight>0;});
+  var excludedModelWeightTotal=positions.filter(function(p){return manualExclude.has(p.ticker)&&p.modelWeight>0;}).reduce(function(s,p){return s+p.modelWeight;},0);
+  var includedModelWeightTotal=includedForScale.reduce(function(s,p){return s+p.modelWeight;},0);
+  var totalPortfolioValue=positions.reduce(function(s,p){return s+p.initialUSD;},0);
+  positions.forEach(function(p){
+    if(manualExclude.has(p.ticker)){
+      p.rescaledModelUSD=0;
+      p.rescaledModelWeight=0;
+    } else if(excludedModelWeightTotal>0&&includedModelWeightTotal>0){
+      // redistribute excluded weight proportionally
+      var scaleFactor=(p.modelWeight+p.modelWeight*(excludedModelWeightTotal/includedModelWeightTotal))/p.modelWeight;
+      p.rescaledModelWeight=p.modelWeight*scaleFactor;
+      p.rescaledModelUSD=p.modelUSD*scaleFactor;
+    } else {
+      p.rescaledModelUSD=p.modelUSD;
+      p.rescaledModelWeight=p.modelWeight;
+    }
+  });
   var totalProceeds=0;
   if(!exOver){
     positions.forEach(function(p){
@@ -466,26 +488,29 @@ function recalc(){
   function allocateCash(cashAvail, posList, postSellFn, modelWeightTotal){
     var totalAllocated=0;
     if(posList.length===0) return totalAllocated;
-    var totalGap=posList.reduce(function(s,p){return s+Math.max(0,p.modelUSD-postSellFn(p));},0);
+    // Use rescaledModelUSD as target if available (restricted position mode), else fall back to modelUSD
+    function targetUSD(p){return p.rescaledModelUSD>0?p.rescaledModelUSD:p.modelUSD;}
+    function targetWeight(p){return p.rescaledModelWeight>0?p.rescaledModelWeight:p.modelWeight;}
+    var totalGap=posList.reduce(function(s,p){return s+Math.max(0,targetUSD(p)-postSellFn(p));},0);
     if(totalGap<=0) return totalAllocated;
 
     if(cashAvail>=totalGap){
-      // Pass 1: fill every position exactly to target
+      // Pass 1: fill every position exactly to rescaled target
       posList.forEach(function(p){
-        var gap=Math.max(0,p.modelUSD-postSellFn(p));
+        var gap=Math.max(0,targetUSD(p)-postSellFn(p));
         var alloc=gap;
         var shares=p.price>0?alloc/p.price:0;
         if(whole){shares=Math.floor(shares);alloc=shares*p.price;}
         p.allocationUSD=alloc;p.sharesToBuy=shares;
-        p.adjWeight=modelWeightTotal>0?p.modelWeight/modelWeightTotal:0;
+        p.adjWeight=modelWeightTotal>0?targetWeight(p)/modelWeightTotal:0;
         totalAllocated+=alloc;
       });
-      // Pass 2: deploy excess by model weight
+      // Pass 2: deploy excess by rescaled model weight
       var excess=cashAvail-totalAllocated;
       if(excess>0.01){
-        var mwTotal=posList.reduce(function(s,p){return s+p.modelWeight;},0);
+        var mwTotal=posList.reduce(function(s,p){return s+targetWeight(p);},0);
         posList.forEach(function(p){
-          var extraAlloc=mwTotal>0?(p.modelWeight/mwTotal)*excess:0;
+          var extraAlloc=mwTotal>0?(targetWeight(p)/mwTotal)*excess:0;
           var extraShares=p.price>0?extraAlloc/p.price:0;
           if(whole){extraShares=Math.floor(extraShares);extraAlloc=extraShares*p.price;}
           p.allocationUSD+=extraAlloc;p.sharesToBuy+=extraShares;
@@ -493,9 +518,9 @@ function recalc(){
         });
       }
     } else {
-      // Insufficient cash: scale proportionally by gap so all positions move toward target at same rate
+      // Insufficient cash: scale proportionally by gap so all positions move toward rescaled target at same rate
       posList.forEach(function(p){
-        var gap=Math.max(0,p.modelUSD-postSellFn(p));
+        var gap=Math.max(0,targetUSD(p)-postSellFn(p));
         var adj=totalGap>0?gap/totalGap:0;
         p.adjWeight=adj;
         var alloc=cashAvail*adj;
@@ -511,12 +536,13 @@ function recalc(){
     buyPositions=positions.filter(function(p){
       if(manualExclude.has(p.ticker)) return false;
       if(exNotHeld&&p.initialUSD===0) return false;
-      if(p.modelUSD<=0) return false;
-      return (p.initialUSD-p.sellUSD)<p.modelUSD;
+      var tgt=p.rescaledModelUSD>0?p.rescaledModelUSD:p.modelUSD;
+      if(tgt<=0) return false;
+      return (p.initialUSD-p.sellUSD)<tgt;
     });
-    var mwTotal=buyPositions.reduce(function(s,p){return s+p.modelWeight;},0);
+    var mwTotal=buyPositions.reduce(function(s,p){return s+(p.rescaledModelWeight>0?p.rescaledModelWeight:p.modelWeight);},0);
     var totalAllocated=allocateCash(totalCash, buyPositions, function(p){return p.initialUSD-p.sellUSD;}, mwTotal);
-    positions.forEach(function(p){p.postUSD=(p.initialUSD-p.sellUSD)+p.allocationUSD;p.postRatio=p.modelUSD>0?p.postUSD/p.modelUSD:0;});
+    positions.forEach(function(p){p.postUSD=(p.initialUSD-p.sellUSD)+p.allocationUSD;var tgt=p.rescaledModelUSD>0?p.rescaledModelUSD:p.modelUSD;p.postRatio=tgt>0?p.postUSD/tgt:0;});
     var oot=positions.filter(function(p){return p.modelUSD>0&&(getTolerance(p)==='over'||getTolerance(p)==='under');}).length;
     document.getElementById('ss-sellcount').textContent=positions.filter(function(p){return p.sellUSD>0;}).length;
     document.getElementById('ss-proceeds').textContent=fmt$(totalProceeds);
@@ -528,14 +554,14 @@ function recalc(){
   } else {
     buyPositions=positions.filter(function(p){
       if(manualExclude.has(p.ticker)) return false;
-      if(p.differenceUSD>=0&&p.modelWeight>0) return false;
+      if(p.initialUSD>=p.rescaledModelUSD&&p.rescaledModelUSD>0) return false;
       if(exNotHeld&&p.initialUSD===0) return false;
-      return p.modelWeight>0;
+      return p.rescaledModelUSD>0;
     });
-    var mwTotal=buyPositions.reduce(function(s,p){return s+p.modelWeight;},0);
+    var mwTotal=buyPositions.reduce(function(s,p){return s+p.rescaledModelWeight;},0);
     var totalAllocated=allocateCash(cash, buyPositions, function(p){return p.initialUSD;}, mwTotal);
-    positions.forEach(function(p){p.postUSD=p.initialUSD+p.allocationUSD;p.postRatio=p.modelUSD>0?p.postUSD/p.modelUSD:0;});
-    var totalGap=buyPositions.reduce(function(s,p){return s+Math.abs(p.differenceUSD);},0);
+    positions.forEach(function(p){p.postUSD=p.initialUSD+p.allocationUSD;p.postRatio=p.rescaledModelUSD>0?p.postUSD/p.rescaledModelUSD:0;});
+    var totalGap=buyPositions.reduce(function(s,p){return s+Math.max(0,p.rescaledModelUSD-p.initialUSD);},0);
     var remainder=cash-totalAllocated;
     document.getElementById('s-cash').textContent=fmt$(cash);
     document.getElementById('s-alloc').textContent=fmt$(totalAllocated);
@@ -597,12 +623,12 @@ function renderTable(){
       +'<td class="cell-name">'+p.name+'</td>'
       +'<td class="cell-num">'+fmt$(p.price)+'</td>'
       +'<td class="cell-num">'+(p.initialUSD>0?fmt$(p.initialUSD):'--')+'</td>'
-      +'<td class="cell-num">'+(p.modelUSD>0?fmt$(p.modelUSD):'--')+'</td>'
+      +'<td class="cell-num">'+(p.rescaledModelUSD>0&&p.rescaledModelUSD!==p.modelUSD?fmt$(p.rescaledModelUSD)+' <span class="badge" style="background:#e8f0f8;color:#1a4f7a;border:1px solid #b8d0e8;font-size:8px">adj</span>':p.modelUSD>0?fmt$(p.modelUSD):'--')+'</td>'
       +'<td class="cell-num '+dc+'">'+gd+' '+badge+'</td>'
       +'<td>'+sellCell+'</td>'
       +'<td class="cell-num">'+(p.allocationUSD>0?'<span class="buy-val">+'+fmt$(p.allocationUSD)+'</span>':'--')+'</td>'
       +'<td class="cell-num">'+(p.sharesToBuy>0?fmtSH(p.sharesToBuy,whole)+' sh':'--')+'</td>'
-      +'<td class="cell-num">'+(p.modelUSD>0?(p.postRatio*100).toFixed(1)+'% '+tolB:'--')+'</td>'
+      +'<td class="cell-num">'+(p.rescaledModelUSD>0||(p.modelUSD>0)?(p.postRatio*100).toFixed(1)+'% '+tolB:'--')+'</td>'
       +'</tr>';
   });
   document.getElementById('tableBody').innerHTML=html;
